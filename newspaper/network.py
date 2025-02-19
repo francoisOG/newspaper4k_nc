@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, List, Optional, Tuple, Union
 import logging
 import requests
-
+import time
+import random
 from requests import RequestException
 from requests import Response
 import tldextract
@@ -19,13 +20,14 @@ log = logging.getLogger(__name__)
 
 FAIL_ENCODING = "ISO-8859-1"
 
-HEADER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Referrer": "https://www.google.com/",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Cache-Control": "no-cache",
-}
+
+# HEADER = {
+#     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+#     "Referer": "https://www.google.com/",
+#     "Accept-Language": "en-US,en;q=0.9",
+#     "Accept-Encoding": "gzip, deflate, br",
+#     "Cache-Control": "no-cache",
+# }
 
 
 def get_session() -> requests.Session:
@@ -203,57 +205,90 @@ def is_binary_url(url: str) -> bool:
     return False
 
 
-def do_request(url: str, config: Configuration) -> Response:
-    """Perform a HTTP GET request to the specified URL using the provided configuration.
-    Args:
-        url (str): The URL to send the request to.
-        config (Configuration): The configuration object containing request parameters.
+def do_request(url: str, config) -> Optional[requests.Response]:
+    """Perform an HTTP GET request while handling binary data issues gracefully."""
+    # Use headers from the config, falling back to an empty dictionary if not set
+    if config.headers:
+        session.headers.update(config.headers)
 
-    Returns:
-        requests.Response: The response object containing the server's response
-            to the request.
-    """
-
-    session.headers.update(HEADER)
+    # Ensure User-Agent is explicitly set (if not in headers)
+    if config.browser_user_agent:
+        session.headers["User-Agent"] = config.browser_user_agent
 
     if not config.allow_binary_content:
-        if is_binary_url(url):
-            raise ArticleBinaryDataException(f"Article is binary data: {url}")
+        if is_binary_url(url):  # Ensure this function is defined somewhere
+            log.warning("Skipping binary content URL: %s", url)
+            return None  # Instead of raising an exception, return None
 
-    response = session.get(
-        url=url,
-        **config.requests_params,
-    )
-
-    return response
+    try:
+        response = session.get(url=url, **config.requests_params)
+        # print("sucessful url", url)
+        return response
+    except RequestException as e:
+        print("Error fetching URL %s: %s", url, e)
+        return None  # Return None if any request fails
 
 
 def get_html(
     url: str,
-    config: Optional[Configuration] = None,
-    response: Optional[Response] = None,
+    config: Configuration = None,
+    response: Response = None,
 ) -> str:
+    """Fetches the HTML content of a URL with the given configuration.
+
+    Args:
+        url (str): The URL to fetch.
+        config (Configuration, optional): Configuration object for request parameters. Defaults to None.
+        response (Response, optional): A pre-existing response object. Defaults to None.
+
+    Returns:
+        str: The HTML content of the response if successful, otherwise an empty string or None on failure.
+    """
+
     html = ""
     config = config or Configuration()
 
+    # Use headers from config dynamically
+    if config.headers:
+        session.headers.update(config.headers)
+
     try:
         html, status_code, _ = get_html_status(url, config, response)
+
+        if status_code == 200:
+            response = session.get(url)  # Uses config-defined headers
+            return response.text
+
         if status_code == 401:  # Retry with authentication
             log.warning("401 Unauthorized. Retrying with authentication.")
-            response = requests.get(url, headers=HEADER)
-
+            response = session.get(url)
             if response.status_code == 200:
                 return response.text
-            else:
-                return ""
+            return ""
+
+        if status_code == 403:  # Retry logic for 403 Forbidden
+            log.warning("403 Forbidden. Retrying with delay and different headers.")
+            MAX_RETRIES = 3
+            retries = 0
+            while retries < MAX_RETRIES:
+                time.sleep(random.randint(2, 3))  # Random delay
+                response = session.get(url)
+
+                if response.status_code != 403:
+                    return response.text
+                retries += 1
+            return ""
 
         if status_code >= 400:
             log.warning("get_html() bad status code %s on URL: %s", status_code, url)
             if config.http_success_only:
-                raise ArticleException(f"Http error {status_code} on {url}")
+                raise Exception(f"Http error {status_code} on {url}")
             return ""
-    except RequestException as e:
-        log.debug("get_html() error. %s on URL: %s", e, url)
+
+    except requests.RequestException as e:
+        log.error("Error fetching URL %s: %s", url, e)
+        return None  # Return None instead of empty string for better debugging
+
     return html
 
 
