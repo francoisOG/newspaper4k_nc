@@ -171,7 +171,11 @@ class Configuration:
             "timeout": 7,
             "proxies": {},
             "headers": {
-                "User-Agent": f"newspaper/{__version__}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Referrer": "https://www.google.com/",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Cache-Control": "no-cache",
             },
         }
 

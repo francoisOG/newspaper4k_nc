@@ -21,15 +21,6 @@ log = logging.getLogger(__name__)
 FAIL_ENCODING = "ISO-8859-1"
 
 
-# HEADER = {
-#     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-#     "Referer": "https://www.google.com/",
-#     "Accept-Language": "en-US,en;q=0.9",
-#     "Accept-Encoding": "gzip, deflate, br",
-#     "Cache-Control": "no-cache",
-# }
-
-
 def get_session() -> requests.Session:
     """
     Get an HTTP requests session for making requests.
@@ -211,10 +202,6 @@ def do_request(url: str, config) -> Optional[requests.Response]:
     if config.headers:
         session.headers.update(config.headers)
 
-    # Ensure User-Agent is explicitly set (if not in headers)
-    if config.browser_user_agent:
-        session.headers["User-Agent"] = config.browser_user_agent
-
     if not config.allow_binary_content:
         if is_binary_url(url):  # Ensure this function is defined somewhere
             log.warning("Skipping binary content URL: %s", url)
@@ -222,10 +209,9 @@ def do_request(url: str, config) -> Optional[requests.Response]:
 
     try:
         response = session.get(url=url, **config.requests_params)
-        # print("sucessful url", url)
         return response
     except RequestException as e:
-        print("Error fetching URL %s: %s", url, e)
+        log.warning("Error fetching URL %s: %s", url, e)
         return None  # Return None if any request fails
 
 
@@ -254,7 +240,6 @@ def get_html(
 
     try:
         html, status_code, _ = get_html_status(url, config, response)
-
         if status_code == 200:
             response = session.get(url)  # Uses config-defined headers
             return response.text
@@ -264,6 +249,7 @@ def get_html(
             response = session.get(url)
             if response.status_code == 200:
                 return response.text
+
             return ""
 
         if status_code == 403:  # Retry logic for 403 Forbidden
@@ -392,5 +378,4 @@ def multithread_request(
                 log.warning(
                     "multithread_request(): Http download error %s on URL: %s", e, url
                 )
-
     return results
