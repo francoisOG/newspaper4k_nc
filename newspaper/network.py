@@ -19,6 +19,14 @@ log = logging.getLogger(__name__)
 
 FAIL_ENCODING = "ISO-8859-1"
 
+HEADER = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Referrer": "https://www.google.com/",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+}
+
 
 def get_session() -> requests.Session:
     """
@@ -205,7 +213,8 @@ def do_request(url: str, config: Configuration) -> Response:
         requests.Response: The response object containing the server's response
             to the request.
     """
-    session.headers.update(config.requests_params["headers"])
+
+    session.headers.update(HEADER)
 
     if not config.allow_binary_content:
         if is_binary_url(url):
@@ -224,28 +233,27 @@ def get_html(
     config: Optional[Configuration] = None,
     response: Optional[Response] = None,
 ) -> str:
-    """Returns the html content from an url.
-    if response is provided, no download will occur. The html will be extracted
-    from the provided response.
-    It does encoding sanitization and dammit if necessary.
-    In case of http error (e.g. 404, 500), it returns an empty string.
-    If `config`.`http_success_only` is True, it raises an exception in
-    case of a http error.
-    """
     html = ""
     config = config or Configuration()
+
     try:
         html, status_code, _ = get_html_status(url, config, response)
+        if status_code == 401:  # Retry with authentication
+            log.warning("401 Unauthorized. Retrying with authentication.")
+            response = requests.get(url, headers=HEADER)
+
+            if response.status_code == 200:
+                return response.text
+            else:
+                return ""
+
         if status_code >= 400:
             log.warning("get_html() bad status code %s on URL: %s", status_code, url)
             if config.http_success_only:
-                raise ArticleException(
-                    f"Http error when downloading {url}. Status code: {{status_code}}"
-                )
+                raise ArticleException(f"Http error {status_code} on {url}")
             return ""
     except RequestException as e:
         log.debug("get_html() error. %s on URL: %s", e, url)
-
     return html
 
 
