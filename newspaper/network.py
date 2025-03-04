@@ -296,9 +296,11 @@ def get_html_status(
             response.status_code,
             response.history,
         )
-
     response = do_request(url, config)
 
+    if not response:
+        log.error("Failed to get response from %s", url)
+        return "", 404, []  # Return empty string and error code
     if response.status_code != 200:
         log.warning(
             "get_html_status(): bad status code %s on URL: %s, html: %s",
