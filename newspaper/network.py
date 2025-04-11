@@ -8,14 +8,17 @@ import logging
 import requests
 import time
 import random
-from requests import RequestException
+from requests.exceptions import SSLError, RequestException
 from requests import Response
 import tldextract
+import certifi
 
 from newspaper import parsers
 from newspaper.exceptions import ArticleException, ArticleBinaryDataException
 from newspaper.configuration import Configuration
+import urllib3
 
+urllib3.disable_warnings()
 log = logging.getLogger(__name__)
 
 FAIL_ENCODING = "ISO-8859-1"
@@ -196,6 +199,17 @@ def is_binary_url(url: str) -> bool:
     return False
 
 
+# full_chain.pem = GeoTrustTLSRSACAG1.crt.pem+DigiCertGlobalRootG2.crt.pem"
+FULL_CHAIN_CERT_PATH = "newspaper/ssl_cert/full_chain.pem"
+
+
+def safe_get(url):
+    try:
+        return requests.get(url, verify=FULL_CHAIN_CERT_PATH, timeout=10)
+    except requests.exceptions.SSLError:
+        return requests.get(url, verify=False, timeout=10)
+
+
 def do_request(url: str, config) -> Optional[requests.Response]:
     """Perform an HTTP GET request while handling binary data issues gracefully."""
     # Use headers from the config, falling back to an empty dictionary if not set
@@ -206,13 +220,15 @@ def do_request(url: str, config) -> Optional[requests.Response]:
         if is_binary_url(url):  # Ensure this function is defined somewhere
             log.warning("Skipping binary content URL: %s", url)
             return None  # Instead of raising an exception, return None
-
     try:
         response = session.get(url=url, **config.requests_params)
         return response
+    except SSLError as ssl_err:
+        print("SSL error occurred for URL %s: %s" % (url, ssl_err))
+        return safe_get(url)  # fallback on SSL error
     except RequestException as e:
-        log.warning("Error fetching URL %s: %s", url, e)
-        return None  # Return None if any request fails
+        print("Error fetching URL %s: %s" % (url, e))
+        return None
 
 
 def get_html(
@@ -234,15 +250,14 @@ def get_html(
     html = ""
     config = config or Configuration()
 
-    # Use headers from config dynamically
-    if config.headers:
-        session.headers.update(config.headers)
+    # # Use headers from config dynamically
+    # if config.headers:
+    #     session.headers.update(config.headers)
 
     try:
         html, status_code, _ = get_html_status(url, config, response)
         if status_code == 200:
-            response = session.get(url)  # Uses config-defined headers
-            return response.text
+            return html
 
         if status_code == 401:  # Retry with authentication
             log.warning("401 Unauthorized. Retrying with authentication.")
@@ -289,7 +304,6 @@ def get_html_status(
     - Error out if a non 2XX HTTP response code is returned.
     """
     config = config or Configuration()
-
     if response is not None:
         return (
             _get_html_from_response(response, config),
@@ -297,7 +311,6 @@ def get_html_status(
             response.history,
         )
     response = do_request(url, config)
-
     if not response:
         log.error("Failed to get response from %s", url)
         return "", 404, []  # Return empty string and error code
@@ -368,8 +381,10 @@ def multithread_request(
         result_futures = [
             tpe.submit(do_request, url=url, config=config) for url in urls
         ]
+
         for idx, future in enumerate(result_futures):
             url = urls[idx]
+
             try:
                 results.append(future.result())
             except TimeoutError:
@@ -380,4 +395,5 @@ def multithread_request(
                 log.warning(
                     "multithread_request(): Http download error %s on URL: %s", e, url
                 )
+    # print(results)
     return results
