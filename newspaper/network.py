@@ -3,6 +3,7 @@ Helper functions for http requests and remote data fetching.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 import logging
 import requests
@@ -200,11 +201,16 @@ def is_binary_url(url: str) -> bool:
 
 
 # full_chain.pem = GeoTrustTLSRSACAG1.crt.pem+DigiCertGlobalRootG2.crt.pem"
-FULL_CHAIN_CERT_PATH = "newspaper/ssl_cert/full_chain.pem"
+FULL_CHAIN_CERT_PATH = "np_ssl_cert_full_chain.pem"
 
 
 def safe_get(url):
     try:
+        # Use the full chain certificate for SSL verification
+        # if certifcate is not found, it will be created
+        if not Path(FULL_CHAIN_CERT_PATH).exists():
+            with open(FULL_CHAIN_CERT_PATH, "wb") as cert_file:
+                cert_file.write(certifi.where().encode("utf-8"))
         return requests.get(url, verify=FULL_CHAIN_CERT_PATH, timeout=10)
     except requests.exceptions.SSLError:
         return requests.get(url, verify=False, timeout=10)

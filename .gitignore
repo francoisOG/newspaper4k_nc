@@ -5,6 +5,9 @@
 .pypirc
 .conda
 
+# ignore ssl certs
+np_ssl_cert_full_chain.pem
+
 # C extensions
 *.so
 
