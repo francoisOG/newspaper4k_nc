@@ -229,8 +229,7 @@ def do_request(url: str, config) -> Optional[requests.Response]:
     try:
         response = session.get(url=url, **config.requests_params)
         return response
-    except SSLError as ssl_err:
-        print("SSL error occurred for URL %s: %s" % (url, ssl_err))
+    except SSLError:
         return safe_get(url)  # fallback on SSL error
     except RequestException as e:
         print("Error fetching URL %s: %s" % (url, e))
