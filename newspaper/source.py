@@ -485,7 +485,10 @@ class Source:
             if self.source_type == "News":
                 url_title_tups = get_news_article_urls(category.doc)
             else:
-                url_title_tups = get_company_article_urls(category.doc)
+                # For company sources, try both methods and combine results
+                news_urls = get_news_article_urls(category.doc)
+                company_urls = get_company_article_urls(category.doc)
+                url_title_tups = list(set(news_urls + company_urls))
 
             cur_articles = [
                 Article(

@@ -183,6 +183,20 @@ def valid_url(url: str, test: bool = False) -> bool:
         r'/resources/',
         r'/company-news/',
         r'/media/',
+        r'/entry/',
+        r'/content/',
+        r'/resource/',
+        r'/announcement/',
+        r'/update/',
+        r'/insight/',
+        r'/feature/',
+        r'/story/',
+        r'/releases/',
+        r'/press-release/',
+        r'/newsroom/',
+        r'/corporate/',
+        r'/about/news/',
+        r'/about/press/',
     ]
     
     # If URL matches any company content pattern, consider it valid
