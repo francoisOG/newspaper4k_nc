@@ -155,43 +155,10 @@ def prepare_url(url: str, source_url: Optional[str] = None) -> str:
 
 
 def valid_url(url: str, test: bool = False) -> bool:
-    r"""
+    """
     Is this URL a valid news-article url?
 
-    Perform a regex check on an absolute url.
-
-    First, perform a few basic checks like making sure the format of the url
-    is right, (scheme, domain, tld).
-
-    Second, make sure that the url isn't some static resource, check the
-    file type.
-
-    Then, search of a YYYY/MM/DD pattern in the url. News sites
-    love to use this pattern, this is a very safe bet.
-
-    Separators can be [\.-/_]. Years can be 2 or 4 digits, must
-    have proper digits 1900-2099. Months and days can be
-    ambiguous 2 digit numbers, one is even optional, some sites are
-    liberal with their formatting also matches snippets of GET
-    queries with keywords inside them. ex: asdf.php?topic_id=blahlbah
-    We permit alphanumeric, _ and -.
-
-    Our next check makes sure that a keyword is within one of the
-    separators in a url (subdomain or early path separator).
-    cnn.com/story/blah-blah-blah would pass due to "story".
-
-    We filter out articles in this stage by aggressively checking to
-    see if any resemblance of the source& domain's name or tld is
-    present within the article title. If it is, that's bad. It must
-    be a company link, like 'cnn is hiring new interns'.
-
-    We also filter out articles with a subdomain or first degree path
-    on a registered bad keyword.
-    Args:
-        url (str): the url to check
-        test (bool): whether to preprocess the url
-    Returns:
-        bool: True if the url is a valid article link, False otherwise
+    For company websites, we also check for common blog and news patterns.
     """
     # If we are testing this method in the testing suite, we actually
     # need to preprocess the url like we do in the article's constructor!
@@ -202,6 +169,26 @@ def valid_url(url: str, test: bool = False) -> bool:
     if url is None or len(url) < 11:
         log.debug("url %s rejected due to short length < 11", url)
         return False
+
+    # Check for common company content patterns
+    company_patterns = [
+        r'/blog/',
+        r'/news/',
+        r'/press/',
+        r'/article/',
+        r'/post/',
+        r'/updates/',
+        r'/announcements/',
+        r'/insights/',
+        r'/resources/',
+        r'/company-news/',
+        r'/media/',
+    ]
+    
+    # If URL matches any company content pattern, consider it valid
+    for pattern in company_patterns:
+        if pattern in url.lower():
+            return True
 
     r1 = "mailto:" in url  # TODO not sure if these rules are redundant
     r2 = ("http://" not in url) and ("https://" not in url)

@@ -231,46 +231,48 @@ class Source:
 
     def set_feeds(self):
         """Don't need to cache getting feed urls, it's almost
-        instant with xpath
+        instant with xpath. For news sites, primarily relies on RSS feeds.
+        For company sites, checks common blog/news feed patterns.
         """
+        # Keep minimal but effective feed suffixes based on source type
 
-        common_feed_sufixes = (
-            ["/feed", "/feeds", "/rss"]
-            if self.source_type == "News"
-            else [
-                "/rss",
-                "/rss.xml",
-                "/feed",
-                "/feed.xml",
-                "/feeds",
+        common_feed_sufixes = [
+            "/feed",
+            "/rss",
+            "/feeds"
+        ]
+        if self.source_type == "Company":  # Company
+            common_feed_sufixes.extend([
                 "/blog/rss",
-                "/blog/feed",
                 "/news/rss",
-                "/news/feed",
-                "/press-releases/rss",
-            ]
-        )
+                "/press/rss",
+                "/blog/feed",
+                "/news/feed"
+            ])
+
         common_feed_urls = [urljoin(self.url, url) for url in common_feed_sufixes]
 
+        # Handle special cases like Medium
         split = urlsplit(self.url)
         if split.netloc in ("medium.com", "www.medium.com"):
-            # should handle URL to user or user's post
             if split.path.startswith("/@"):
                 new_path = "/feed/" + split.path.split("/")[1]
                 new_parts = split.scheme, split.netloc, new_path, "", ""
                 common_feed_urls.append(urlunsplit(new_parts))
 
+        # Add feed URLs for each category, but only with primary suffixes
+        primary_suffixes = ["/rss", "/feed"] # Most common feed patterns
         for cat in self.categories:
             path_chunks = [x for x in cat.url.split("/") if len(x) > 0]
             if len(path_chunks) and "." in path_chunks[-1]:
-                # skip urls with file extensions (.php, .html)
                 continue
-            for suffix in common_feed_sufixes:
+            for suffix in primary_suffixes:
                 common_feed_urls.append(cat.url + suffix)
 
+        # Download and process feed URLs
         responses = network.multithread_request(common_feed_urls, self.config)
-
         common_feed_urls_as_categories = []
+
         for response in responses:
             if not response or response.status_code > 299:
                 continue
@@ -278,20 +280,16 @@ class Source:
             feed.doc = parsers.fromstring(feed.html)
             if feed.doc is not None:
                 common_feed_urls_as_categories.append(feed)
-            # else:
-            #     print("No urls found")
 
+        # Combine all categories and feed URLs
         categories_and_common_feed_urls = (
             self.categories + common_feed_urls_as_categories
         )
-        # Add the main webpage of the Source
         categories_and_common_feed_urls.append(
-            Category(
-                url=self.url,
-                html=self.html,
-                doc=self.doc,
-            )
+            Category(url=self.url, html=self.html, doc=self.doc)
         )
+
+        # Get final feed URLs
         url_list = self.extractor.get_feed_urls(
             self.url, categories_and_common_feed_urls
         )
@@ -413,28 +411,81 @@ class Source:
         return articles
 
     def categories_to_articles(self) -> List[Article]:
-        """Takes the categories, splays them into a big list of urls and churns
-        the articles out of each url with the url_to_article method
+        """Takes the categories and extracts article URLs.
+        Uses different strategies for News and Company sources.
         """
         articles = []
 
         def prepare_url(url):
             if urls.is_abs_url(url):
                 return url
-            else:
-                return urls.urljoin_if_valid(self.url, url)
+            return urls.urljoin_if_valid(self.url, url)
 
-        def get_urls(doc):
+        def get_news_article_urls(doc):
+            """Get article URLs using traditional news site patterns"""
             if doc is None:
                 return []
-            return [
-                (prepare_url(a.get("href")), a.text)
-                for a in parsers.get_tags(doc, tag="a")
-                if a.get("href")
-            ]
+            
+            # Look for links in article containers
+            article_containers = []
+            news_patterns = ["article", "story", "news", "feature", "post"]
+            
+            for pattern in news_patterns:
+                elements = parsers.get_tags(doc, tag="div", attribs={"class": pattern})
+                elements.extend(parsers.get_tags(doc, tag="div", attribs={"id": pattern}))
+                article_containers.extend(elements)
+            
+            links = []
+            for container in article_containers:
+                links.extend(parsers.get_tags(container, tag="a"))
+            
+            if not links:
+                links = parsers.get_tags(doc, tag="a")
+            
+            return [(prepare_url(a.get("href")), a.text) for a in links if a.get("href")]
 
+        def get_company_article_urls(doc):
+            """Get article URLs using company website patterns"""
+            if doc is None:
+                return []
+            
+            article_containers = []
+            company_patterns = [
+                "article", "post", "blog", "news", "press",
+                "entry", "content", "resource", "media",
+                "announcement", "update", "insight"
+            ]
+            
+            # Look for article containers
+            for pattern in company_patterns:
+                elements = parsers.get_tags(doc, tag="div", attribs={"class": pattern})
+                elements.extend(parsers.get_tags(doc, tag="div", attribs={"id": pattern}))
+                article_containers.extend(elements)
+            
+            # Also look for article links in navigation menus
+            nav_containers = []
+            nav_patterns = ["nav", "menu", "navigation"]
+            for pattern in nav_patterns:
+                elements = parsers.get_tags(doc, tag="nav", attribs={"class": pattern})
+                elements.extend(parsers.get_tags(doc, tag="div", attribs={"class": pattern}))
+                nav_containers.extend(elements)
+            
+            # Get links from both article containers and navigation
+            links = []
+            for container in article_containers + nav_containers:
+                links.extend(parsers.get_tags(container, tag="a"))
+            
+            if not links:
+                links = parsers.get_tags(doc, tag="a")
+            
+            return [(prepare_url(a.get("href")), a.text) for a in links if a.get("href")]
+
+        # Process each category based on source type
         for category in self.categories:
-            url_title_tups = get_urls(category.doc)
+            if self.source_type == "News":
+                url_title_tups = get_news_article_urls(category.doc)
+            else:
+                url_title_tups = get_company_article_urls(category.doc)
 
             cur_articles = [
                 Article(
@@ -447,6 +498,7 @@ class Source:
                 for url, title in url_title_tups
                 if urls.valid_url(url)
             ]
+
             log.debug(
                 "For Category %s got %d articles from %d candidates",
                 category.url,
