@@ -111,6 +111,7 @@ class Source:
         url: str,
         read_more_link: str = "",
         config: Optional[Configuration] = None,
+        source_type="News",
         **kwargs,
     ):
         """The config object for this source will be passed into all of this
@@ -163,6 +164,8 @@ class Source:
 
         self.is_parsed = False
         self.is_downloaded = False
+
+        self.source_type = source_type
 
     def build(self, input_html=None, only_homepage=False, only_in_path=False):
         """Encapsulates download and basic parsing with lxml.
@@ -230,7 +233,23 @@ class Source:
         """Don't need to cache getting feed urls, it's almost
         instant with xpath
         """
-        common_feed_sufixes = ["/feed", "/feeds", "/rss"]
+
+        common_feed_sufixes = (
+            ["/feed", "/feeds", "/rss"]
+            if self.source_type == "News"
+            else [
+                "/rss",
+                "/rss.xml",
+                "/feed",
+                "/feed.xml",
+                "/feeds",
+                "/blog/rss",
+                "/blog/feed",
+                "/news/rss",
+                "/news/feed",
+                "/press-releases/rss",
+            ]
+        )
         common_feed_urls = [urljoin(self.url, url) for url in common_feed_sufixes]
 
         split = urlsplit(self.url)
@@ -259,8 +278,8 @@ class Source:
             feed.doc = parsers.fromstring(feed.html)
             if feed.doc is not None:
                 common_feed_urls_as_categories.append(feed)
-            else:
-                print(f"No urls found")
+            # else:
+            #     print("No urls found")
 
         categories_and_common_feed_urls = (
             self.categories + common_feed_urls_as_categories

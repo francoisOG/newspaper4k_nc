@@ -107,7 +107,7 @@ class ContentExtractor:
             total_feed_urls.extend(feed_urls)
 
         total_feed_urls = list(set(total_feed_urls))
-        total_feed_urls = total_feed_urls[:50]
+        total_feed_urls = total_feed_urls[:5000]
         total_feed_urls = [urls.prepare_url(f, source_url) for f in total_feed_urls]
         total_feed_urls = list(set(total_feed_urls))
         return total_feed_urls

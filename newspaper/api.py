@@ -17,6 +17,7 @@ from newspaper.utils import print_available_languages
 
 def build(
     url="",
+    source_type="News",
     dry=False,
     only_homepage=False,
     only_in_path=False,
@@ -52,7 +53,7 @@ def build(
     config = config or Configuration()
     config.update(**kwargs)
     url = url or ""
-    s = Source(url, config=config)
+    s = Source(url, config=config, source_type=source_type)
     if not dry:
         s.build(
             only_homepage=only_homepage,
