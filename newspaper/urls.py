@@ -170,40 +170,6 @@ def valid_url(url: str, test: bool = False) -> bool:
         log.debug("url %s rejected due to short length < 11", url)
         return False
 
-    # Check for common company content patterns
-    company_patterns = [
-        r'/blog/',
-        r'/news/',
-        r'/press/',
-        r'/article/',
-        r'/post/',
-        r'/updates/',
-        r'/announcements/',
-        r'/insights/',
-        r'/resources/',
-        r'/company-news/',
-        r'/media/',
-        r'/entry/',
-        r'/content/',
-        r'/resource/',
-        r'/announcement/',
-        r'/update/',
-        r'/insight/',
-        r'/feature/',
-        r'/story/',
-        r'/releases/',
-        r'/press-release/',
-        r'/newsroom/',
-        r'/corporate/',
-        r'/about/news/',
-        r'/about/press/',
-    ]
-    
-    # If URL matches any company content pattern, consider it valid
-    for pattern in company_patterns:
-        if pattern in url.lower():
-            return True
-
     r1 = "mailto:" in url  # TODO not sure if these rules are redundant
     r2 = ("http://" not in url) and ("https://" not in url)
 
@@ -253,6 +219,42 @@ def valid_url(url: str, test: bool = False) -> bool:
         log.debug("url %s rejected due to bad domain (%s)", url, tld)
         return False
 
+    # Check for common company content patterns first
+    company_patterns = [
+        r'/blog/',
+        r'/news/',
+        r'/press/',
+        r'/article/',
+        r'/post/',
+        r'/updates/',
+        r'/announcements/',
+        r'/insights/',
+        r'/resources/',
+        r'/company-news/',
+        r'/media/',
+        r'/entry/',
+        r'/content/',
+        r'/resource/',
+        r'/announcement/',
+        r'/update/',
+        r'/insight/',
+        r'/feature/',
+        r'/story/',
+        r'/releases/',
+        r'/press-release/',
+        r'/newsroom/',
+        r'/corporate/',
+        r'/about/news/',
+        r'/about/press/',
+    ]
+    
+    # If URL matches any company content pattern, consider it valid
+    url_lower = url.lower()
+    for pattern in company_patterns:
+        if pattern in url_lower:
+            log.debug("url %s accepted due to company pattern %s", url, pattern)
+            return True
+
     if len(path_chunks) == 0:
         dash_count, underscore_count = 0, 0
     else:
@@ -280,10 +282,19 @@ def valid_url(url: str, test: bool = False) -> bool:
 
     # Check for subdomain & path red flags
     # Eg: http://cnn.com/careers.html or careers.cnn.com --> BAD
-    for b in BAD_CHUNKS:
-        if b in path_chunks or b == subd:
-            log.debug("url %s rejected due to bad chunk (%s)", url, b)
-            return False
+    # Skip checking BAD_CHUNKS for paths that contain company content indicators
+    should_check_bad_chunks = True
+    company_indicators = ['blog', 'news', 'press', 'article', 'post', 'media']
+    for chunk in path_chunks:
+        if any(indicator in chunk.lower() for indicator in company_indicators):
+            should_check_bad_chunks = False
+            break
+    
+    if should_check_bad_chunks:
+        for b in BAD_CHUNKS:
+            if b in path_chunks or b == subd:
+                log.debug("url %s rejected due to bad chunk (%s)", url, b)
+                return False
 
     match_date = re.search(DATE_REGEX, url)
 
@@ -312,6 +323,7 @@ def valid_url(url: str, test: bool = False) -> bool:
         if good.lower() in [p.lower() for p in path_chunks]:
             log.debug("url %s accepted for good path", url)
             return True
+            
     log.debug("url %s rejected for default false", url)
     return False
 

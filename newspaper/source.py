@@ -421,74 +421,42 @@ class Source:
                 return url
             return urls.urljoin_if_valid(self.url, url)
 
-        def get_news_article_urls(doc):
-            """Get article URLs using traditional news site patterns"""
+        def get_urls(doc):
+            """Get all URLs from the document, with additional company-specific collection"""
             if doc is None:
                 return []
+                
+            all_links = parsers.get_tags(doc, tag="a")
             
-            # Look for links in article containers
-            article_containers = []
-            news_patterns = ["article", "story", "news", "feature", "post"]
+            if self.source_type == "Company":
+                company_patterns = [
+                    "article", "post", "blog", "news", "press",
+                    "entry", "content", "resource", "media",
+                    "announcement", "update", "insight"
+                ]
+                for pattern in company_patterns:
+                    elements = parsers.get_tags(doc, tag="div", attribs={"class": pattern})
+                    elements.extend(parsers.get_tags(doc, tag="div", attribs={"id": pattern}))
+                    for container in elements:
+                        all_links.extend(parsers.get_tags(container, tag="a"))
+                
+                nav_patterns = ["nav", "menu", "navigation"]
+                for pattern in nav_patterns:
+                    elements = parsers.get_tags(doc, tag="nav", attribs={"class": pattern})
+                    elements.extend(parsers.get_tags(doc, tag="div", attribs={"class": pattern}))
+                    for container in elements:
+                        all_links.extend(parsers.get_tags(container, tag="a"))
             
-            for pattern in news_patterns:
-                elements = parsers.get_tags(doc, tag="div", attribs={"class": pattern})
-                elements.extend(parsers.get_tags(doc, tag="div", attribs={"id": pattern}))
-                article_containers.extend(elements)
-            
-            links = []
-            for container in article_containers:
-                links.extend(parsers.get_tags(container, tag="a"))
-            
-            if not links:
-                links = parsers.get_tags(doc, tag="a")
-            
-            return [(prepare_url(a.get("href")), a.text) for a in links if a.get("href")]
+            return list(set([
+                (prepare_url(a.get("href")), a.text)
+                for a in all_links
+                if a.get("href")
+            ]))
 
-        def get_company_article_urls(doc):
-            """Get article URLs using company website patterns"""
-            if doc is None:
-                return []
-            
-            article_containers = []
-            company_patterns = [
-                "article", "post", "blog", "news", "press",
-                "entry", "content", "resource", "media",
-                "announcement", "update", "insight"
-            ]
-            
-            # Look for article containers
-            for pattern in company_patterns:
-                elements = parsers.get_tags(doc, tag="div", attribs={"class": pattern})
-                elements.extend(parsers.get_tags(doc, tag="div", attribs={"id": pattern}))
-                article_containers.extend(elements)
-            
-            # Also look for article links in navigation menus
-            nav_containers = []
-            nav_patterns = ["nav", "menu", "navigation"]
-            for pattern in nav_patterns:
-                elements = parsers.get_tags(doc, tag="nav", attribs={"class": pattern})
-                elements.extend(parsers.get_tags(doc, tag="div", attribs={"class": pattern}))
-                nav_containers.extend(elements)
-            
-            # Get links from both article containers and navigation
-            links = []
-            for container in article_containers + nav_containers:
-                links.extend(parsers.get_tags(container, tag="a"))
-            
-            if not links:
-                links = parsers.get_tags(doc, tag="a")
-            
-            return [(prepare_url(a.get("href")), a.text) for a in links if a.get("href")]
-
-        # Process each category based on source type
+        # Process each category
         for category in self.categories:
-            if self.source_type == "News":
-                url_title_tups = get_news_article_urls(category.doc)
-            else:
-                # For company sources, try both methods and combine results
-                news_urls = get_news_article_urls(category.doc)
-                company_urls = get_company_article_urls(category.doc)
-                url_title_tups = list(set(news_urls + company_urls))
+            # Get all URLs from the document
+            url_title_tups = get_urls(category.doc)
 
             cur_articles = [
                 Article(
