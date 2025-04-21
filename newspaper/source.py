@@ -247,7 +247,9 @@ class Source:
                 "/news/rss",
                 "/press/rss",
                 "/blog/feed",
-                "/news/feed"
+                "/news/feed",
+                "/newsroom/feed",
+                "/media/feed"
             ])
 
         common_feed_urls = [urljoin(self.url, url) for url in common_feed_sufixes]
@@ -430,9 +432,10 @@ class Source:
             
             if self.source_type == "Company":
                 company_patterns = [
-                    "article", "post", "blog", "news", "press",
-                    "entry", "content", "resource", "media",
-                    "announcement", "update", "insight"
+                    "article", "blog", "news", "press",
+                    "content", "resource", "media",
+                    "newsroom", "corporate", "research",
+                    "case-study", "insights"
                 ]
                 for pattern in company_patterns:
                     elements = parsers.get_tags(doc, tag="div", attribs={"class": pattern})
@@ -440,7 +443,7 @@ class Source:
                     for container in elements:
                         all_links.extend(parsers.get_tags(container, tag="a"))
                 
-                nav_patterns = ["nav", "menu", "navigation"]
+                nav_patterns = ["nav", "menu", "navigation", "newsroom", "media-center"]
                 for pattern in nav_patterns:
                     elements = parsers.get_tags(doc, tag="nav", attribs={"class": pattern})
                     elements.extend(parsers.get_tags(doc, tag="div", attribs={"class": pattern}))

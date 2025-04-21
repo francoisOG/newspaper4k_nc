@@ -101,6 +101,46 @@ BAD_DOMAINS = [
     "pinterest",
 ]
 
+# Common news/content subdomains that are likely valid
+GOOD_SUBDOMAINS = [
+    "news",
+    "blog",
+    "blogs",
+    "press",
+    "media",
+    "newsroom",
+    "insights",
+    "resources",
+    "corporate",
+    "about",
+    "ir"  # investor relations
+]
+
+# Subdomains that typically don't contain articles
+BAD_SUBDOMAINS = [
+    "ads",
+    "advertising",
+    "api",
+    "cdn",
+    "chat",
+    "dev",
+    "developer",
+    "email",
+    "help",
+    "jobs",
+    "login",
+    "mail",
+    "my",
+    "secure",
+    "shop",
+    "staging",
+    "static",
+    "status",
+    "store",
+    "support",
+    "webmail",
+]
+
 
 def redirect_back(url: str, source_domain: str) -> str:
     """
@@ -213,6 +253,16 @@ def valid_url(url: str, test: bool = False) -> bool:
     subd = tld_dat.subdomain
     tld = tld_dat.domain.lower()
 
+    # Quick accept for known good subdomains
+    if subd and subd.lower() in GOOD_SUBDOMAINS:
+        log.debug("url %s accepted due to good subdomain %s", url, subd)
+        return True
+
+    # Quick reject for known bad subdomains
+    if subd and subd.lower() in BAD_SUBDOMAINS:
+        log.debug("url %s rejected due to bad subdomain %s", url, subd)
+        return False
+
     url_slug = path_chunks[-1] if path_chunks else ""
 
     if tld in BAD_DOMAINS:
@@ -225,9 +275,9 @@ def valid_url(url: str, test: bool = False) -> bool:
         r'/news/',
         r'/press/',
         r'/article/',
-        r'/post/',
-        r'/updates/',
-        r'/announcements/',
+        r'/articles/',
+        r'/media/',
+        r'/newsroom/',
         r'/insights/',
         r'/resources/',
         r'/company-news/',
@@ -241,11 +291,11 @@ def valid_url(url: str, test: bool = False) -> bool:
         r'/feature/',
         r'/story/',
         r'/releases/',
-        r'/press-release/',
-        r'/newsroom/',
         r'/corporate/',
         r'/about/news/',
-        r'/about/press/',
+        r'/investor-relations/',
+        r'/research/',
+        r'/case-studies/'
     ]
     
     # If URL matches any company content pattern, consider it valid
@@ -285,6 +335,13 @@ def valid_url(url: str, test: bool = False) -> bool:
     # Skip checking BAD_CHUNKS for paths that contain company content indicators
     should_check_bad_chunks = True
     company_indicators = ['blog', 'news', 'press', 'article', 'post', 'media']
+    
+    # Also check subdomain for company indicators
+    if subd and any(indicator in subd.lower() for indicator in company_indicators):
+        should_check_bad_chunks = False
+        log.debug("url %s accepted due to company indicator in subdomain %s", url, subd)
+        return True
+
     for chunk in path_chunks:
         if any(indicator in chunk.lower() for indicator in company_indicators):
             should_check_bad_chunks = False
