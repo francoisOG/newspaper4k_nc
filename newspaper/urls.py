@@ -141,6 +141,64 @@ BAD_SUBDOMAINS = [
     "webmail",
 ]
 
+# Common press release and news section identifiers
+PRESS_SECTION_INDICATORS = [
+    "press-release",
+    "press-releases",
+    "news-release",
+    "news-releases",
+    "media-release",
+    "media-releases",
+    "pressemitteilung",  # German
+    "communique",  # French
+    "comunicado",  # Spanish
+    "feature",
+    "announcement"
+]
+
+# Common press content type identifiers
+PRESS_CONTENT_TYPES = [
+    "press-release",
+    "news-release",
+    "feature",
+    "press-kit",
+    "press-event",
+    "media-advisory",
+    "statement",
+    "announcement"
+]
+
+# Common company domains and paths that indicate a corporate site
+COMPANY_INDICATORS = [
+    "corporate",
+    "corp",
+    "enterprise",
+    "company",
+    "about",
+    "investor",
+    "ir.",
+    "business"
+]
+
+# Common company content patterns
+company_patterns = [
+    r'/blog/',
+    r'/news/',
+    r'/press/',
+    r'/article/',
+    r'/articles/',
+    r'/media/',
+    r'/newsroom/',
+    r'/insights/',
+    r'/resources/',
+    r'/releases/',
+    r'/corporate/',
+    r'/about/news/',
+    r'/investor-relations/',
+    r'/research/',
+    r'/case-studies/'
+]
+
 
 def redirect_back(url: str, source_domain: str) -> str:
     """
@@ -194,17 +252,32 @@ def prepare_url(url: str, source_url: Optional[str] = None) -> str:
     return proper_url
 
 
-def valid_url(url: str, test: bool = False) -> bool:
+def valid_url(url: str, test: bool = False, source_type: str = "News") -> bool:
     """
     Is this URL a valid news-article url?
-
     For company websites, we also check for common blog and news patterns.
+
+    Args:
+        url: The URL to validate
+        test: Whether this is being run in a test
+        source_type: The type of source ("News" or "Company")
     """
-    # If we are testing this method in the testing suite, we actually
-    # need to preprocess the url like we do in the article's constructor!
+
     if test:
         url = prepare_url(url)
 
+    # For Company sources, check additional company-specific patterns first
+    is_company = source_type == "Company"
+    company_match = False
+    
+    if is_company:
+        # Check press section and article patterns first
+        if is_press_section(url) or is_press_article(url):
+            log.debug("url %s accepted due to company press patterns", url)
+            return True
+
+    # Continue with standard validation for all URLs
+    
     # 11 chars is shortest valid url length, eg: http://x.co
     if url is None or len(url) < 11:
         log.debug("url %s rejected due to short length < 11", url)
@@ -227,7 +300,6 @@ def valid_url(url: str, test: bool = False) -> bool:
     if path.endswith("/"):
         path = path[:-1]
 
-    # '/story/cnn/blahblah/index.html' --> ['story', 'cnn', 'blahblah', 'index.html']
     path_chunks = [x for x in path.split("/") if len(x) > 0]
 
     # siphon out the file type. eg: .html, .htm, .md
@@ -269,41 +341,14 @@ def valid_url(url: str, test: bool = False) -> bool:
         log.debug("url %s rejected due to bad domain (%s)", url, tld)
         return False
 
-    # Check for common company content patterns first
-    company_patterns = [
-        r'/blog/',
-        r'/news/',
-        r'/press/',
-        r'/article/',
-        r'/articles/',
-        r'/media/',
-        r'/newsroom/',
-        r'/insights/',
-        r'/resources/',
-        r'/company-news/',
-        r'/media/',
-        r'/entry/',
-        r'/content/',
-        r'/resource/',
-        r'/announcement/',
-        r'/update/',
-        r'/insight/',
-        r'/feature/',
-        r'/story/',
-        r'/releases/',
-        r'/corporate/',
-        r'/about/news/',
-        r'/investor-relations/',
-        r'/research/',
-        r'/case-studies/'
-    ]
-    
-    # If URL matches any company content pattern, consider it valid
+    # Check for common company content patterns
     url_lower = url.lower()
     for pattern in company_patterns:
         if pattern in url_lower:
             log.debug("url %s accepted due to company pattern %s", url, pattern)
-            return True
+            company_match = True
+            if is_company:
+                return True
 
     if len(path_chunks) == 0:
         dash_count, underscore_count = 0, 0
@@ -330,21 +375,22 @@ def valid_url(url: str, test: bool = False) -> bool:
         )
         return False
 
-    # Check for subdomain & path red flags
-    # Eg: http://cnn.com/careers.html or careers.cnn.com --> BAD
-    # Skip checking BAD_CHUNKS for paths that contain company content indicators
+
     should_check_bad_chunks = True
     company_indicators = ['blog', 'news', 'press', 'article', 'post', 'media']
     
     # Also check subdomain for company indicators
     if subd and any(indicator in subd.lower() for indicator in company_indicators):
         should_check_bad_chunks = False
-        log.debug("url %s accepted due to company indicator in subdomain %s", url, subd)
-        return True
+        company_match = True
+        if is_company:
+            log.debug("url %s accepted due to company indicator in subdomain %s", url, subd)
+            return True
 
     for chunk in path_chunks:
         if any(indicator in chunk.lower() for indicator in company_indicators):
             should_check_bad_chunks = False
+            company_match = True
             break
     
     if should_check_bad_chunks:
@@ -380,6 +426,11 @@ def valid_url(url: str, test: bool = False) -> bool:
         if good.lower() in [p.lower() for p in path_chunks]:
             log.debug("url %s accepted for good path", url)
             return True
+            
+    # For company URLs, accept if we found any company indicators earlier
+    if is_company and company_match:
+        log.debug("url %s accepted due to company match", url)
+        return True
             
     log.debug("url %s rejected for default false", url)
     return False
@@ -496,3 +547,99 @@ def urljoin_if_valid(base_url: str, url: str) -> str:
         return res
     except ValueError:
         return ""
+
+
+def is_press_section(url: str) -> bool:
+    """
+    Determines if a URL points to a press section/listing page.
+    These pages typically contain lists of press releases.
+    """
+    path = urlparse(url).path.lower()
+    
+    # Check for press section patterns in path
+    press_indicators = [
+        "/press/",
+        "/press-room/",
+        "/newsroom/",
+        "/media-center/",
+        "/media-centre/",
+        "/news-and-media/",
+        "/media-relations/",
+        "/press-office/",
+        "/news-center/",
+        "/company/news/",
+        "/company/press/",
+        "/company/media/",
+        "/corporate/news/",
+        "/corporate/press/",
+        "/about/news/",
+        "/about/press/",
+        "/about/media/"
+    ]
+    
+    if any(indicator in path for indicator in press_indicators):
+        return True
+        
+    # Check for press section identifiers
+    if any(indicator in path for indicator in PRESS_SECTION_INDICATORS):
+        return True
+        
+    return False
+
+
+def is_press_article(url: str) -> bool:
+    """
+    Determines if a URL points to an actual press release or news article.
+    More specific than the general valid_url check.
+    """
+    path = urlparse(url).path.lower()
+    path_chunks = [x.lower() for x in path.split("/") if len(x) > 0]
+    
+    # Check if URL contains a date pattern (common in press releases)
+    if re.search(DATE_REGEX, url):
+        return True
+        
+    # Check for content type indicators
+    if any(content_type in path for content_type in PRESS_CONTENT_TYPES):
+        return True
+        
+    # Check for numeric ID in URL (common in press systems)
+    for chunk in path_chunks:
+        if re.search(r"\d{4,}", chunk):  # Looking for IDs of 4+ digits
+            return True
+            
+    # Check for typical press release URL patterns
+    press_patterns = [
+        r"/\d{4}/\d{2}/",  # Date-based URL structure
+        r"/pr-\d+",        # PR number pattern
+        r"/release-\d+",   # Release number pattern
+        r"/news/\d{4}/",   # Year-based news structure
+        r"/article-\d+",   # Article ID pattern
+        r"/story-\d+",     # Story ID pattern
+        r"/id-\d+",        # Generic ID pattern
+        r"/\d{4}/[a-z0-9-]+$"  # Year followed by slug
+    ]
+    
+    if any(re.search(pattern, path) for pattern in press_patterns):
+        return True
+        
+    return False
+
+
+def valid_company_url(url: str) -> bool:
+    """
+    Enhanced validation specifically for company URLs.
+    Builds on top of valid_url but adds company-specific checks.
+    """
+    # First check if it's a press section
+    if is_press_section(url):
+        log.debug("url %s accepted as press section", url)
+        return True
+        
+    # Then check if it's a press article
+    if is_press_article(url):
+        log.debug("url %s accepted as press article", url)
+        return True
+        
+    # If neither, fall back to standard validation
+    return valid_url(url, source_type="News")  # Use News type to avoid recursion
