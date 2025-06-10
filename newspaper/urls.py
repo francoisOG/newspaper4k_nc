@@ -257,10 +257,34 @@ def valid_url(url: str, test: bool = False, source_type: str = "News") -> bool:
     Is this URL a valid news-article url?
     For company websites, we also check for common blog and news patterns.
 
+    Perform a regex check on an absolute url.
+    First, perform a few basic checks like making sure the format of the url
+    is right, (scheme, domain, tld).
+    Second, make sure that the url isn't some static resource, check the
+    file type.
+    Then, search of a YYYY/MM/DD pattern in the url. News sites
+    love to use this pattern, this is a very safe bet.
+    Separators can be [\.-/_]. Years can be 2 or 4 digits, must
+    have proper digits 1900-2099. Months and days can be
+    ambiguous 2 digit numbers, one is even optional, some sites are
+    liberal with their formatting also matches snippets of GET
+    queries with keywords inside them. ex: asdf.php?topic_id=blahlbah
+    We permit alphanumeric, _ and -.
+    Our next check makes sure that a keyword is within one of the
+    separators in a url (subdomain or early path separator).
+    cnn.com/story/blah-blah-blah would pass due to "story".
+    We filter out articles in this stage by aggressively checking to
+    see if any resemblance of the source& domain's name or tld is
+    present within the article title. If it is, that's bad. It must
+    be a company link, like 'cnn is hiring new interns'.
+    We also filter out articles with a subdomain or first degree path
+    on a registered bad keyword.
     Args:
         url: The URL to validate
         test: Whether this is being run in a test
         source_type: The type of source ("News" or "Company")
+    Returns:
+        bool: True if the url is a valid article link, False otherwise
     """
 
     if test:
