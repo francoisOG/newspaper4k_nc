@@ -9,6 +9,7 @@ from newspaper.extractors.defines import url_stopwords, category_url_prefixes
 import newspaper.parsers as parsers
 from newspaper import Config
 
+
 def _get_other_links(
     doc: lxml.html.Element, filter_tld: Optional[str] = None
 ) -> Iterator[str]:
@@ -40,6 +41,7 @@ def _get_other_links(
         return True
 
     return filter(_filter, candidates)
+
 
 def is_valid_link(url: str, filter_tld: str) -> Tuple[bool, Dict[str, Any]]:
     """Is the url a possible category?"""
@@ -73,10 +75,7 @@ def is_valid_link(url: str, filter_tld: str) -> Tuple[bool, Dict[str, Any]]:
 
         # Ex. microsoft.com is definitely not related to
         # espn.com, but espn.go.com is probably related to espn.com
-        if (
-            child_tld.domain != filter_tld
-            and filter_tld not in child_subdomain_parts
-        ):
+        if child_tld.domain != filter_tld and filter_tld not in child_subdomain_parts:
             return False, parsed_url
 
         if child_tld.subdomain in ["m", "i"]:
@@ -105,6 +104,220 @@ def is_valid_link(url: str, filter_tld: str) -> Tuple[bool, Dict[str, Any]]:
     return len(path_chunks) == 1 and 1 < len(path_chunks[0]) < 20, parsed_url
 
 
+def is_valid_link_v2(url: str, filter_tld: str) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Optimized function to determine if a URL represents a valid category page.
+
+    Args:
+        url: The URL to validate
+        filter_tld: The target domain to filter for
+
+    Returns:
+        Tuple of (is_valid: bool, parsed_url_info: dict)
+    """
+
+    # Common locale patterns (language/country codes)
+    locale_pattern = re.compile(r"^[a-z]{2}(_[a-z]{2})?$", re.IGNORECASE)
+
+    # Words that typically indicate non-category pages
+    non_category_indicators = {
+        "sitemap",
+        "search",
+        "login",
+        "logout",
+        "register",
+        "signup",
+        "signin",
+        "admin",
+        "api",
+        "rss",
+        "feed",
+        "xml",
+        "json",
+        "pdf",
+        "download",
+        "print",
+        "share",
+        "edit",
+        "delete",
+        "create",
+        "new",
+        "add",
+        "update",
+        "forms",
+        "form",
+        "submit",
+        "confirmation",
+        "thank-you",
+        "error",
+        "404",
+        "500",
+        "maintenance",
+        "coming-soon",
+    }
+
+    parsed_url: Dict[str, Any] = {
+        "scheme": (
+            urls.get_scheme(url, allow_fragments=False) if "urls" in globals() else None
+        ),
+        "domain": (
+            urls.get_domain(url, allow_fragments=False) if "urls" in globals() else None
+        ),
+        "path": (
+            urls.get_path(url, allow_fragments=False) if "urls" in globals() else url
+        ),
+        "tld": None,
+        "is_category": False,
+        "category_type": None,
+        "locale": None,
+    }
+
+    # Handle case where urls module is not available - extract from URL directly
+    if "urls" not in globals():
+        if url.startswith(("http://", "https://")):
+            parts = url.split("/", 3)
+            parsed_url["scheme"] = parts[0][:-1]  # Remove the colon
+            parsed_url["domain"] = parts[2] if len(parts) > 2 else None
+            parsed_url["path"] = "/" + parts[3] if len(parts) > 3 else "/"
+        else:
+            parsed_url["path"] = url if url else "/"
+
+    path = parsed_url["path"] or ""
+
+    # Basic validation - must have a path
+    if not path or path == "/":
+        return False, parsed_url
+
+    # Remove fragment identifiers and reject if starts with fragment
+    if path.startswith("#"):
+        return False, parsed_url
+
+    # Handle scheme validation if available
+    if parsed_url["scheme"] and parsed_url["scheme"] not in ("http", "https"):
+        return False, parsed_url
+
+    # Parse path segments
+    path_chunks = [x for x in path.split("/") if len(x) > 0]
+
+    # Remove common non-content files
+    if "index.html" in path_chunks:
+        path_chunks.remove("index.html")
+
+    if not path_chunks:
+        return False, parsed_url
+
+    # Domain validation if filter_tld is provided and domain is available
+    if filter_tld and parsed_url["domain"]:
+        try:
+            child_tld = tldextract.extract(url)
+            parsed_url["tld"] = child_tld
+            child_subdomain_parts = child_tld.subdomain.split(".")
+
+            # Check domain relationship
+            if (
+                child_tld.domain != filter_tld
+                and filter_tld not in child_subdomain_parts
+            ):
+                return False, parsed_url
+
+            # Reject mobile/international subdomains that aren't category-focused
+            if child_tld.subdomain in ["m", "i", "mobile"]:
+                return False, parsed_url
+        except:
+            # If tldextract fails, continue with path validation
+            pass
+
+    # Reject paths with private/system indicators
+    if any(chunk.startswith(("_", "#", ".")) for chunk in path_chunks):
+        return False, parsed_url
+
+    # Check for non-category indicators
+    if any(
+        indicator in chunk.lower()
+        for chunk in path_chunks
+        for indicator in non_category_indicators
+    ):
+        return False, parsed_url
+
+    # Analyze path structure
+    num_chunks = len(path_chunks)
+
+    # Single segment path - check if it's a reasonable category name
+    if num_chunks == 1:
+        segment = path_chunks[0].lower()
+        # Must be reasonable length and potentially a category
+        if 2 <= len(segment) <= 30 and (
+            segment in category_url_prefixes
+            or not any(char.isdigit() for char in segment)  # Avoid article IDs
+        ):
+            parsed_url["is_category"] = True
+            parsed_url["category_type"] = "root_category"
+            return True, parsed_url
+
+    # Two segment path - common pattern for localized sites
+    elif num_chunks == 2:
+        first_segment = path_chunks[0].lower()
+        second_segment = path_chunks[1].lower()
+
+        # Check if first segment is a locale (e.g., 'fr_fr', 'en_us')
+        if locale_pattern.match(first_segment):
+            parsed_url["locale"] = first_segment
+            # Second segment should be a category
+            if second_segment in category_url_prefixes or (
+                2 <= len(second_segment) <= 30
+                and not any(char.isdigit() for char in second_segment)
+            ):
+                parsed_url["is_category"] = True
+                parsed_url["category_type"] = "localized_category"
+                return True, parsed_url
+
+        # Or first segment is a known category prefix
+        elif first_segment in category_url_prefixes:
+            parsed_url["is_category"] = True
+            parsed_url["category_type"] = "subcategory"
+            return True, parsed_url
+
+    # Three segment path - locale + category + subcategory
+    elif num_chunks == 3:
+        first_segment = path_chunks[0].lower()
+        second_segment = path_chunks[1].lower()
+        third_segment = path_chunks[2].lower()
+
+        # Locale + category + subcategory pattern
+        if (
+            locale_pattern.match(first_segment)
+            and second_segment in category_url_prefixes
+            and 2 <= len(third_segment) <= 30
+            and not any(char.isdigit() for char in third_segment)
+        ):
+            parsed_url["locale"] = first_segment
+            parsed_url["is_category"] = True
+            parsed_url["category_type"] = "localized_subcategory"
+            return True, parsed_url
+
+    # Four or more segments - likely too deep to be a main category
+    # But allow some exceptions for well-structured category hierarchies
+    elif num_chunks == 4:
+        first_segment = path_chunks[0].lower()
+        second_segment = path_chunks[1].lower()
+
+        # Very specific case: locale + category + subcategory + sub-subcategory
+        if (
+            locale_pattern.match(first_segment)
+            and second_segment in category_url_prefixes
+            and all(
+                2 <= len(chunk) <= 20 and not chunk.isdigit()
+                for chunk in path_chunks[2:]
+            )
+        ):
+            parsed_url["locale"] = first_segment
+            parsed_url["is_category"] = True
+            parsed_url["category_type"] = "deep_category"
+            return True, parsed_url
+
+    return False, parsed_url
+
+
 def category_parser(source_url: str, doc: lxml.html.Element) -> List[str]:
     """Inputs source lxml root and source url, extracts domain and
     finds all of the top level urls, we are assuming that these are
@@ -118,7 +331,7 @@ def category_parser(source_url: str, doc: lxml.html.Element) -> List[str]:
     category_candidates: List[Any] = []
 
     for p_url in links_in_doc:
-        ok, parsed_url = is_valid_link(p_url, domain_tld.domain)
+        ok, parsed_url = is_valid_link_v2(p_url, domain_tld.domain)
         if ok:
             if not parsed_url["domain"]:
                 parsed_url["domain"] = urls.get_domain(
@@ -148,11 +361,9 @@ def category_parser(source_url: str, doc: lxml.html.Element) -> List[str]:
             )
 
     if len(_valid_categories) == 0:
-        other_links_in_doc = set(
-            _get_other_links(doc, filter_tld=domain_tld.domain)
-        )
+        other_links_in_doc = set(_get_other_links(doc, filter_tld=domain_tld.domain))
         for p_url in other_links_in_doc:
-            ok, parsed_url = is_valid_link(p_url, domain_tld.domain)
+            ok, parsed_url = is_valid_link_v2(p_url, domain_tld.domain)
             if ok:
                 path = parsed_url["path"].lower().split("/")
                 subdomain = parsed_url["tld"].subdomain.lower().split(".")
@@ -179,18 +390,21 @@ def category_parser(source_url: str, doc: lxml.html.Element) -> List[str]:
     categories = sorted(category_urls)
     return categories
 
+
 if __name__ == "__main__":
 
     CONFIG = Config()
     CONFIG.memorize_articles = False
-    CONFIG.proxies = {'http': 'https://user-sp3dmjf4nd-country-fr:=O2G7cET0gfzz7gigr@isp.decodo.com:10000',
-    'https': 'https://user-sp3dmjf4nd-country-fr:=O2G7cET0gfzz7gigr@isp.decodo.com:10000'}
+    CONFIG.proxies = {
+        "http": "https://user-sp3dmjf4nd-country-fr:=O2G7cET0gfzz7gigr@isp.decodo.com:10000",
+        "https": "https://user-sp3dmjf4nd-country-fr:=O2G7cET0gfzz7gigr@isp.decodo.com:10000",
+    }
 
     url = "https://www.ey.com"
     source_type = "Company"
     s = Source(url, config=CONFIG, source_type=source_type)
 
-    input_html = only_homepage = only_in_path=False
+    input_html = only_homepage = only_in_path = False
     s.download()
     s.parse()
 
@@ -210,10 +424,6 @@ if __name__ == "__main__":
     # s.parse_feeds()
 
     s.generate_articles(only_in_path=only_in_path)
-
-
-
-
 
     # links = ['https://www.youtube.com/EYFranceOfficiel']
 
